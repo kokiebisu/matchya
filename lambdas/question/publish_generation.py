@@ -42,40 +42,20 @@ def connect_to_db():
     db_cursor = db_conn.cursor()
 
 
-def get_github_username_from_position_id(position_id):
+def questions_already_exist(position_id):
     """
-    Retrieves the GitHub username of the company from the database.
+    Checks if questions already exists for the position.
 
     :param position_id: Unique identifier for the position.
-    :return: The GitHub username of the company.
+    :return: True if questions already exist, False otherwise.
     """
-    logger.info("Getting the github username from position id...")
-    sql = """
-            SELECT Company.github_username FROM Company
-            INNER JOIN Position ON Company.id = Position.company_id
-            WHERE Position.id = '%s';
-        """
-    try:
-        db_cursor.execute(sql % (position_id))
-        return db_cursor.fetchone()[0]
-    except Exception as e:
-        raise RuntimeError(f"Error getting github_username from postgres: {e}")
-
-
-def checklist_already_exist(position_id):
-    """
-    Checks if a checklist already exists for the position.
-
-    :param position_id: Unique identifier for the position.
-    :return: True if a checklist already exists, False otherwise.
-    """
-    logger.info("Checking if checklist already exists...")
-    sql = f"SELECT id FROM checklist WHERE position_id = '{position_id}';"
+    logger.info("Checking if questions already exists...")
+    sql = f"SELECT id FROM position_question WHERE position_id = '{position_id}';"
     try:
         db_cursor.execute(sql)
         return db_cursor.fetchone() is not None
     except Exception as e:
-        raise RuntimeError(f"Error checking if checklist already exists in postgres: {e}")
+        raise RuntimeError(f"Error checking if questions already exist in postgres: {e}")
 
 
 def send_message_to_sqs(body):
@@ -88,7 +68,7 @@ def send_message_to_sqs(body):
     logger.info("Sending the message to sqs...")
     try:
         response = sqs.send_message(
-            QueueUrl=Config.CHECKLIST_GENERATION_PROCESSOR_QUEUE_URL,
+            QueueUrl=Config.QUESTION_GENERATION_PROCESSOR_QUEUE_URL,
             MessageBody=json.dumps(body)
         )
         if response.get('MessageId') is None:
@@ -107,7 +87,7 @@ def update_generation_status(position_id):
     logger.info("Updating the generation status...")
     sql = """
             UPDATE position
-            SET checklist_generation_status = 'scheduled'
+            SET question_generation_status = 'scheduled'
             WHERE id = %s;
         """
     try:
@@ -131,15 +111,10 @@ def handler(event, context):
         body = parse_request_body(event)
         origin = parse_header(event)
         validate_request_body(body, ['position_id'])
-        if not body['repository_names']:
-            body['repository_names'] = []
 
-        if checklist_already_exist(body['position_id']):
-            logger.error(f"Checklist for position {body['position_id']} already exists")
-            raise RuntimeError(f"Checklist for position {body['position_id']} already exists")
-
-        github_username = get_github_username_from_position_id(body['position_id'])
-        body['github_username'] = github_username
+        if questions_already_exist(body['position_id']):
+            logger.error(f"Questions for position {body['position_id']} already exists")
+            raise RuntimeError(f"Questions for position {body['position_id']} already exists")
 
         send_message_to_sqs(body)
         logger.info(f"Successfully sent message to SQS {body}")
